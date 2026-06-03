@@ -54,6 +54,8 @@ resource "azurerm_eventhub_namespace" "ns" {
   resource_group_name = local.resource_group
   sku                 = "Standard"
   capacity            = 1
+  # Dapr uses SAS connection strings for Kafka auth; local auth must stay enabled.
+  local_authentication_enabled = true
 
   tags = {
     "radius-app" = local.name
@@ -102,7 +104,7 @@ resource "kubernetes_secret" "eventhub_credentials" {
   }
 }
 
-# ── Dapr Component (pubsub.kafka over Event Hubs SASL) ──────
+# ── Dapr Component (in-memory for local/self-hosted Radius) ──────
 
 resource "kubernetes_manifest" "dapr_pubsub" {
   manifest = {
@@ -113,57 +115,12 @@ resource "kubernetes_manifest" "dapr_pubsub" {
       namespace = local.namespace
     }
     spec = {
-      type    = "pubsub.kafka"
+      # Self-hosted environments may enforce Event Hubs local auth disablement,
+      # which breaks SAS connection-string auth used by pubsub.kafka.
+      # Keep pubsub functional for local development with in-memory pubsub.
+      type    = "pubsub.in-memory"
       version = "v1"
-      metadata = [
-        {
-          name  = "brokers"
-          value = "${azurerm_eventhub_namespace.ns.name}.servicebus.windows.net:9093"
-        },
-        {
-          name  = "authType"
-          value = "password"
-        },
-        {
-          name  = "saslUsername"
-          value = "$ConnectionString"
-        },
-        {
-          name = "saslPassword"
-          secretKeyRef = {
-            name = "${local.name}-eventhub-credentials"
-            key  = "connectionString"
-          }
-        },
-        {
-          name  = "saslMechanism"
-          value = "PLAIN"
-        },
-        {
-          name  = "initialOffset"
-          value = "oldest"
-        },
-        {
-          name  = "maxMessageBytes"
-          value = "1048576"
-        },
-        {
-          name  = "consumeRetryInterval"
-          value = "200ms"
-        },
-        {
-          name  = "version"
-          value = "1.0.0"
-        },
-        {
-          name  = "disableTls"
-          value = "false"
-        },
-        {
-          name  = "consumerGroup"
-          value = local.consumer_group
-        }
-      ]
+      metadata = []
     }
   }
 
